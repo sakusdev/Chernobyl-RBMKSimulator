@@ -1,3 +1,4 @@
+export {};
 type RecorderState = { frozen: boolean; filter: "all" | "alarm" | "operation" };
 const state: RecorderState = { frozen: false, filter: "all" };
 function byId<T extends HTMLElement>(id: string): T | null { return document.getElementById(id) as T | null; }
