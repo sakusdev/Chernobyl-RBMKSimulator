@@ -8,6 +8,20 @@ const approach = (value: number, target: number, ratePerSecond: number, dt: numb
   return value + clamp(delta, -ratePerSecond * dt, ratePerSecond * dt);
 };
 
+const defaultControls = (): ControlInput => ({
+  rodTarget: 100,
+  coolantFlowTarget: 35,
+  feedwaterTarget: 35,
+  turbineValveTarget: 0,
+  bypassValveTarget: 0,
+  mainCirculationPumps: 2,
+  feedwaterPumps: 1,
+  separatorLevelTarget: 50,
+  generatorBreakerClosed: false,
+  turbineTrip: false,
+  az5: false,
+});
+
 export class ReactorSimulation {
   private time = 0;
   private neutronPower = 0.0001;
@@ -23,16 +37,14 @@ export class ReactorSimulation {
   private xenon = 18;
   private turbineRpm = 0;
   private periodSeconds = Number.POSITIVE_INFINITY;
+  private separatorLevel = 50;
+  private condenserVacuum = 72;
+  private gridFrequency = 50;
+  private generatorVoltage = 0;
   private mode: OperatingMode = "shutdown";
   private readonly kinetics = new SixGroupPointKinetics(0.0001);
   private readonly spatialCore = new SpatialCoreModel();
-  private controls: ControlInput = {
-    rodTarget: 100,
-    coolantFlowTarget: 35,
-    feedwaterTarget: 35,
-    turbineValveTarget: 0,
-    az5: false,
-  };
+  private controls: ControlInput = defaultControls();
 
   public setControls(next: Partial<ControlInput>): void {
     this.controls = {
@@ -42,6 +54,10 @@ export class ReactorSimulation {
       coolantFlowTarget: clamp(next.coolantFlowTarget ?? this.controls.coolantFlowTarget, 10, 110),
       feedwaterTarget: clamp(next.feedwaterTarget ?? this.controls.feedwaterTarget, 0, 110),
       turbineValveTarget: clamp(next.turbineValveTarget ?? this.controls.turbineValveTarget, 0, 100),
+      bypassValveTarget: clamp(next.bypassValveTarget ?? this.controls.bypassValveTarget, 0, 100),
+      mainCirculationPumps: Math.round(clamp(next.mainCirculationPumps ?? this.controls.mainCirculationPumps, 0, 8)),
+      feedwaterPumps: Math.round(clamp(next.feedwaterPumps ?? this.controls.feedwaterPumps, 0, 3)),
+      separatorLevelTarget: clamp(next.separatorLevelTarget ?? this.controls.separatorLevelTarget, 20, 80),
     };
   }
 
@@ -60,10 +76,14 @@ export class ReactorSimulation {
     this.xenon = 18;
     this.turbineRpm = 0;
     this.periodSeconds = Number.POSITIVE_INFINITY;
+    this.separatorLevel = 50;
+    this.condenserVacuum = 72;
+    this.gridFrequency = 50;
+    this.generatorVoltage = 0;
     this.mode = "shutdown";
     this.kinetics.reset(0.0001);
     this.spatialCore.reset();
-    this.controls = { rodTarget: 100, coolantFlowTarget: 35, feedwaterTarget: 35, turbineValveTarget: 0, az5: false };
+    this.controls = defaultControls();
   }
 
   public step(dt: number): ReactorSnapshot {
@@ -74,9 +94,15 @@ export class ReactorSimulation {
       this.controls.rodTarget = 100;
       this.mode = "scram";
     }
+    if (this.controls.turbineTrip) {
+      this.controls.turbineValveTarget = 0;
+      this.controls.generatorBreakerClosed = false;
+    }
 
     this.rodInsertion = approach(this.rodInsertion, this.controls.rodTarget, this.controls.az5 ? 24 : 1.8, safeDt);
-    this.coolantFlow = approach(this.coolantFlow, this.controls.coolantFlowTarget, 3.5, safeDt);
+    const pumpFlow = this.controls.mainCirculationPumps * 12.5;
+    const requestedFlow = Math.min(this.controls.coolantFlowTarget, pumpFlow + 10);
+    this.coolantFlow = approach(this.coolantFlow, requestedFlow, 4.2, safeDt);
 
     const reactivity = this.calculateReactivity();
     const kinetics = this.kinetics.step(reactivity.total * 1e-5, safeDt, 1.8e-8);
@@ -86,7 +112,9 @@ export class ReactorSimulation {
     const targetThermal = this.neutronPower * 32;
     this.thermalPower = approach(this.thermalPower, targetThermal, 180 + targetThermal * 0.22, safeDt);
     const heatInput = this.thermalPower / 3200;
-    const targetCoolantTemp = 255 + heatInput * 52 - (this.coolantFlow / 100) * 7 - (this.controls.feedwaterTarget / 100) * 2.5;
+    const feedwaterCapacity = this.controls.feedwaterPumps * 38;
+    const effectiveFeedwater = Math.min(this.controls.feedwaterTarget, feedwaterCapacity);
+    const targetCoolantTemp = 255 + heatInput * 52 - (this.coolantFlow / 100) * 7 - (effectiveFeedwater / 100) * 2.5;
     this.coolantTemperature = approach(this.coolantTemperature, targetCoolantTemp, 5.2, safeDt);
     this.fuelTemperature = approach(this.fuelTemperature, this.coolantTemperature + 25 + heatInput * 510, 24, safeDt);
 
@@ -95,11 +123,20 @@ export class ReactorSimulation {
     this.voidFraction = approach(this.voidFraction, clamp((boilingDrive * 58) / flowSuppression, 0, 85), 12, safeDt);
 
     this.steamFlow = clamp(this.thermalPower * 0.52 * (0.3 + this.voidFraction / 100), 0, 1900);
+    const bypassRelief = this.controls.bypassValveTarget * 0.011;
     const pressureTarget = 2 + clamp(this.steamFlow / 1750, 0, 1.2) * 5.1;
-    this.steamPressure = approach(this.steamPressure, pressureTarget - (this.controls.turbineValveTarget / 100) * 0.65, 0.28, safeDt);
+    this.steamPressure = approach(this.steamPressure, pressureTarget - (this.controls.turbineValveTarget / 100) * 0.65 - bypassRelief, 0.34, safeDt);
+
+    const levelBalance = (effectiveFeedwater - this.steamFlow / 17) * 0.012;
+    this.separatorLevel = clamp(this.separatorLevel + levelBalance * safeDt + (this.controls.separatorLevelTarget - this.separatorLevel) * 0.02 * safeDt, 0, 100);
+
     const rpmTarget = clamp(this.steamFlow * (this.controls.turbineValveTarget / 100) * 2.15, 0, 3150);
-    this.turbineRpm = approach(this.turbineRpm, rpmTarget, 95, safeDt);
-    this.electricPower = clamp(this.steamFlow * 0.69 * clamp(this.turbineRpm / 3000, 0, 1), 0, 1100);
+    this.turbineRpm = approach(this.turbineRpm, rpmTarget, this.controls.turbineTrip ? 220 : 95, safeDt);
+    this.condenserVacuum = approach(this.condenserVacuum, 92 - this.controls.bypassValveTarget * 0.17 - this.steamFlow / 120, 2.5, safeDt);
+    this.generatorVoltage = approach(this.generatorVoltage, this.turbineRpm > 2850 ? 20 : 0, 5, safeDt);
+    this.gridFrequency = this.controls.generatorBreakerClosed ? 50 : clamp(this.turbineRpm / 60, 0, 52.5);
+    const generated = this.steamFlow * 0.69 * clamp(this.turbineRpm / 3000, 0, 1);
+    this.electricPower = this.controls.generatorBreakerClosed ? clamp(generated, 0, 1100) : 0;
 
     const xenonProduction = clamp(this.neutronPower / 100, 0, 1.8) * 0.08;
     const xenonBurnoff = clamp(this.neutronPower / 100, 0, 2) * this.xenon * 0.0017;
@@ -160,6 +197,16 @@ export class ReactorSimulation {
       xenonPercent: this.xenon,
       turbineRpm: this.turbineRpm,
       periodSeconds: this.periodSeconds,
+      systems: {
+        mainCirculationPumps: this.controls.mainCirculationPumps,
+        feedwaterPumps: this.controls.feedwaterPumps,
+        separatorLevelPercent: this.separatorLevel,
+        bypassValvePercent: this.controls.bypassValveTarget,
+        condenserVacuumKPa: this.condenserVacuum,
+        generatorBreakerClosed: this.controls.generatorBreakerClosed,
+        gridFrequencyHz: this.gridFrequency,
+        generatorVoltageKV: this.generatorVoltage,
+      },
       coreWidth: this.spatialCore.width,
       coreHeight: this.spatialCore.height,
       coreCells: this.spatialCore.snapshot(),
@@ -169,14 +216,18 @@ export class ReactorSimulation {
 
   private buildAlarms(): Alarm[] {
     return [
-      { id: "high-power", severity: "critical", message: "REACTOR POWER HIGH", active: this.neutronPower > 108 },
-      { id: "short-period", severity: "critical", message: "REACTOR PERIOD SHORT", active: this.periodSeconds > 0 && this.periodSeconds < 10 },
-      { id: "high-pressure", severity: "critical", message: "DRUM PRESSURE HIGH", active: this.steamPressure > 7.25 },
-      { id: "low-flow", severity: "warning", message: "MAIN CIRCULATION FLOW LOW", active: this.coolantFlow < 28 && this.neutronPower > 8 },
-      { id: "high-fuel-temp", severity: "warning", message: "FUEL TEMPERATURE HIGH", active: this.fuelTemperature > 760 },
-      { id: "high-void", severity: "warning", message: "CORE VOID FRACTION HIGH", active: this.voidFraction > 55 },
-      { id: "turbine-overspeed", severity: "critical", message: "TURBINE OVERSPEED", active: this.turbineRpm > 3060 },
-      { id: "scram", severity: "info", message: "AZ-5 ACTIVE", active: this.mode === "scram" },
+      { id: "high-power", severity: "critical", message: "МОЩНОСТЬ РЕАКТОРА ВЫСОКА", active: this.neutronPower > 108 },
+      { id: "short-period", severity: "critical", message: "МАЛЫЙ ПЕРИОД РЕАКТОРА", active: this.periodSeconds > 0 && this.periodSeconds < 10 },
+      { id: "high-pressure", severity: "critical", message: "ДАВЛЕНИЕ БС ВЫСОКО", active: this.steamPressure > 7.25 },
+      { id: "low-flow", severity: "warning", message: "РАСХОД ГЦК НИЗКИЙ", active: this.coolantFlow < 28 && this.neutronPower > 8 },
+      { id: "low-level", severity: "critical", message: "УРОВЕНЬ БС НИЗКИЙ", active: this.separatorLevel < 25 },
+      { id: "high-level", severity: "warning", message: "УРОВЕНЬ БС ВЫСОКИЙ", active: this.separatorLevel > 75 },
+      { id: "high-fuel-temp", severity: "warning", message: "ТЕМПЕРАТУРА ТОПЛИВА ВЫСОКА", active: this.fuelTemperature > 760 },
+      { id: "high-void", severity: "warning", message: "ПАРОСОДЕРЖАНИЕ ВЫСОКО", active: this.voidFraction > 55 },
+      { id: "turbine-overspeed", severity: "critical", message: "РАЗГОН ТУРБИНЫ", active: this.turbineRpm > 3060 },
+      { id: "low-vacuum", severity: "warning", message: "ВАКУУМ КОНДЕНСАТОРА НИЗКИЙ", active: this.condenserVacuum < 55 && this.turbineRpm > 500 },
+      { id: "generator-unsynchronised", severity: "warning", message: "ГЕНЕРАТОР НЕ СИНХРОНИЗИРОВАН", active: this.controls.generatorBreakerClosed && Math.abs(this.gridFrequency - 50) > 0.25 },
+      { id: "scram", severity: "info", message: "АЗ-5 ВВЕДЕНА", active: this.mode === "scram" },
     ];
   }
 }
