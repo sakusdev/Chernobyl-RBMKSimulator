@@ -1,76 +1,166 @@
-import "./styles.css";
+import "./authentic-control-room.css";
 import { SimulationClient } from "./simulation-client";
 import type { CoreField, ReactorSnapshot, TrendPoint } from "../sim/types";
 
 const app = document.querySelector<HTMLDivElement>("#app");
 if (!app) throw new Error("Application root not found");
 
+const annunciators = [
+  "МОЩНОСТЬ РЕАКТОРА ВЫСОКА", "МАЛЫЙ ПЕРИОД РЕАКТОРА", "ДАВЛЕНИЕ БС ВЫСОКО", "РАСХОД ГЦК НИЗКИЙ",
+  "УРОВЕНЬ БС НИЗКИЙ", "УРОВЕНЬ БС ВЫСОКИЙ", "ТЕМПЕРАТУРА ТОПЛИВА", "ПАРОСОДЕРЖАНИЕ",
+  "РАЗГОН ТУРБИНЫ", "ВАКУУМ КОНДЕНСАТОРА", "ГЕНЕРАТОР НЕ СИНХР.", "АЗ-5 ВВЕДЕНА",
+];
+
 app.innerHTML = `
-  <main class="console-shell">
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">CHORNOBYL NPP · UNIT CONTROL</p>
-        <h1>RBMK-1000 Plant Dynamics Simulator</h1>
-        <small id="runtime-status">STARTING SIMULATION CORE…</small>
+  <main class="bshch-shell">
+    <header class="room-header">
+      <div class="station-id">
+        <strong>ЧЕРНОБЫЛЬСКАЯ АЭС · БЛОК 3</strong>
+        <span>БЛОЧНЫЙ ЩИТ УПРАВЛЕНИЯ РБМК-1000</span>
       </div>
-      <div class="topbar-actions">
-        <span id="mode-pill" class="mode-pill">SHUTDOWN</span>
-        <button id="pause-button" class="button">PAUSE</button>
-        <button id="reset-button" class="button button-muted">RESET</button>
+      <div class="clock-bank">
+        <div><span>ВРЕМЯ</span><b id="wall-clock">00:00:00</b></div>
+        <div><span>РЕЖИМ</span><b id="mode-indicator">ОСТАНОВ</b></div>
+        <div><span>ЯДРО</span><b id="runtime-status">ЗАПУСК…</b></div>
+      </div>
+      <div class="master-actions">
+        <button id="pause-button" class="metal-button">ПАУЗА</button>
+        <button id="reset-button" class="metal-button">СБРОС</button>
       </div>
     </header>
 
-    <section class="metrics" id="metrics"></section>
-
-    <section class="workspace">
-      <aside class="panel controls-panel">
-        <div class="panel-heading"><div><span>01</span><h2>Reactor Controls</h2></div><small>MANUAL</small></div>
-        <label class="control-row"><span>Control rod insertion</span><output id="rod-output">100.0%</output><input id="rod-control" type="range" min="0" max="100" value="100" step="0.5" /></label>
-        <label class="control-row"><span>Main circulation flow</span><output id="flow-output">35.0%</output><input id="flow-control" type="range" min="10" max="110" value="35" step="0.5" /></label>
-        <label class="control-row"><span>Feedwater flow</span><output id="feedwater-output">35.0%</output><input id="feedwater-control" type="range" min="0" max="110" value="35" step="0.5" /></label>
-        <label class="control-row"><span>Turbine control valve</span><output id="valve-output">0.0%</output><input id="valve-control" type="range" min="0" max="100" value="0" step="0.5" /></label>
-        <button id="az5-button" class="az5-button"><span>AZ-5</span><small>EMERGENCY PROTECTION</small></button>
-        <div class="procedure"><h3>Startup reference</h3><ol><li>Maintain circulation above 35%.</li><li>Withdraw rods gradually below 64%.</li><li>Open the turbine valve only after stable steam production.</li></ol></div>
-      </aside>
-
-      <section class="panel core-panel">
-        <div class="panel-heading">
-          <div><span>02</span><h2>Core Overview</h2></div>
-          <label><small>FIELD</small><select id="core-field"><option value="power">POWER</option><option value="fuelTemperature">FUEL TEMP</option><option value="voidFraction">VOID</option><option value="xenon">XENON</option><option value="rodInsertion">RODS</option></select></label>
+    <section class="rear-wall">
+      <section class="wall-panel annunciator-wall">
+        <div class="panel-caption">АВАРИЙНАЯ СИГНАЛИЗАЦИЯ</div>
+        <div id="annunciator-grid" class="annunciator-grid">
+          ${annunciators.map((text, index) => `<div class="annunciator" data-annunciator="${index}">${text}</div>`).join("")}
         </div>
-        <div class="core-layout">
-          <div class="core-map" id="core-map" aria-label="Spatial reactor core heat map"></div>
-          <div class="reactivity-stack">
-            <div><span>Total reactivity</span><strong id="reactivity-value">0 pcm</strong></div>
-            <div><span>Rod worth</span><strong id="rod-reactivity">0 pcm</strong></div>
-            <div><span>Void feedback</span><strong id="void-reactivity">0 pcm</strong></div>
-            <div><span>Fuel feedback</span><strong id="fuel-reactivity">0 pcm</strong></div>
-            <div><span>Xenon feedback</span><strong id="xenon-reactivity">0 pcm</strong></div>
-            <div><span>Reactor period</span><strong id="period-value">∞ s</strong></div>
-          </div>
-        </div>
-        <canvas id="trend-canvas" width="960" height="260"></canvas>
       </section>
 
-      <aside class="panel alarm-panel">
-        <div class="panel-heading"><div><span>03</span><h2>Alarm Annunciator</h2></div><small id="alarm-count">0 ACTIVE</small></div>
-        <div id="alarm-list" class="alarm-list"></div>
-        <div class="event-log"><h3>Event log</h3><div id="event-log"></div></div>
-      </aside>
+      <section class="wall-panel reactor-wall">
+        <div class="panel-caption">
+          <span>ФИЗИЧЕСКИЙ КОНТРОЛЬ РЕАКТОРА</span>
+          <select id="core-field" class="soviet-select">
+            <option value="power">МОЩНОСТЬ</option>
+            <option value="fuelTemperature">ТЕМП. ТОПЛИВА</option>
+            <option value="voidFraction">ПАРОСОДЕРЖАНИЕ</option>
+            <option value="xenon">КСЕНОН-135</option>
+            <option value="rodInsertion">ПОГРУЖЕНИЕ СУЗ</option>
+          </select>
+        </div>
+        <div class="reactor-board">
+          <div id="core-map" class="core-map-authentic" aria-label="Карта энерговыделения активной зоны"></div>
+          <div class="vertical-meters">
+            <div class="bar-meter"><span>МОЩН.</span><i id="power-bar"></i><b id="power-value">0.0%</b></div>
+            <div class="bar-meter"><span>ПЕРИОД</span><i id="period-bar"></i><b id="period-value">∞</b></div>
+            <div class="bar-meter"><span>РЕАКТ.</span><i id="reactivity-bar"></i><b id="reactivity-value">0</b></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="wall-panel mimic-wall">
+        <div class="panel-caption">ТЕПЛОВАЯ СХЕМА БЛОКА</div>
+        <svg class="mimic" viewBox="0 0 720 310" role="img" aria-label="Упрощенная тепловая схема РБМК">
+          <g class="pipe primary">
+            <path d="M75 155 H155 V65 H305" />
+            <path d="M75 155 H155 V245 H305" />
+            <path d="M305 65 H420 V120" />
+            <path d="M305 245 H420 V190" />
+          </g>
+          <g class="pipe steam"><path d="M420 120 H530 V85 H650" /></g>
+          <g class="pipe feed"><path d="M650 225 H530 V190 H420" /></g>
+          <rect x="30" y="110" width="90" height="90" class="mimic-device" />
+          <text x="75" y="145">РЕАКТОР</text><text x="75" y="166">РБМК</text>
+          <circle cx="235" cy="65" r="25" class="mimic-device" /><text x="235" y="70">ГЦН-А</text>
+          <circle cx="235" cy="245" r="25" class="mimic-device" /><text x="235" y="250">ГЦН-Б</text>
+          <rect x="385" y="105" width="70" height="100" rx="35" class="mimic-device" />
+          <text x="420" y="145">БС</text><text x="420" y="165">1/2</text>
+          <path d="M535 65 L590 85 L535 105 Z" class="mimic-device" /><text x="565" y="55">ТГ-7</text>
+          <circle cx="650" cy="85" r="28" class="mimic-device" /><text x="650" y="90">Г</text>
+          <rect x="610" y="195" width="80" height="60" class="mimic-device" /><text x="650" y="230">КОНД.</text>
+          <g id="mimic-status"></g>
+        </svg>
+        <div class="mimic-values">
+          <span>БС <b id="separator-level">50.0%</b></span>
+          <span>ДАВЛ. <b id="steam-pressure">2.10 МПа</b></span>
+          <span>ПАР <b id="steam-flow">0 кг/с</b></span>
+          <span>ВАКУУМ <b id="vacuum-value">72 кПа</b></span>
+        </div>
+      </section>
     </section>
 
-    <footer><span>EDUCATIONAL MODEL · NOT FOR ENGINEERING OR OPERATOR TRAINING</span><span id="sim-time">T+00:00:00</span></footer>
+    <section class="operator-desks">
+      <section class="desk siur-desk">
+        <div class="desk-label"><b>СИУР</b><span>СТАРШИЙ ИНЖЕНЕР УПРАВЛЕНИЯ РЕАКТОРОМ</span></div>
+        <div class="instrument-row">
+          <div class="round-gauge" data-min="0" data-max="120"><span>МОЩНОСТЬ<br>% Nном</span><i id="gauge-power"></i><b id="gauge-power-readout">0.0</b></div>
+          <div class="round-gauge"><span>ТЕПЛОВАЯ<br>МВт</span><i id="gauge-thermal"></i><b id="gauge-thermal-readout">0</b></div>
+          <div class="round-gauge"><span>ПЕРИОД<br>сек</span><i id="gauge-period"></i><b id="gauge-period-readout">∞</b></div>
+        </div>
+        <div class="control-strip">
+          <label>СУЗ ОБЩАЯ<input id="rod-control" type="range" min="0" max="100" value="100" step="0.5"><output id="rod-output">100.0%</output></label>
+          <label>ПОЛЕ КСЕНОНА<output id="xenon-output">18.0%</output></label>
+          <label>ПАРОСОДЕРЖ.<output id="void-output">0.0%</output></label>
+        </div>
+        <div class="az-cluster">
+          <button id="az1-button" class="protection-button yellow">АЗ-1</button>
+          <button id="az2-button" class="protection-button yellow">АЗ-2</button>
+          <button id="az5-button" class="az5-button-auth"><span>АЗ-5</span><small>АВАРИЙНАЯ ЗАЩИТА</small></button>
+        </div>
+      </section>
+
+      <section class="desk siub-desk">
+        <div class="desk-label"><b>СИУБ</b><span>СТАРШИЙ ИНЖЕНЕР УПРАВЛЕНИЯ БЛОКОМ</span></div>
+        <div class="pump-board">
+          <div><span>ГЦН</span><div id="mcp-buttons" class="lamp-buttons">${Array.from({length:8},(_,i)=>`<button data-pump="${i+1}"><i></i>${i+1}</button>`).join("")}</div></div>
+          <div><span>ПЭН</span><div id="fwp-buttons" class="lamp-buttons">${Array.from({length:3},(_,i)=>`<button data-fwp="${i+1}"><i></i>${i+1}</button>`).join("")}</div></div>
+        </div>
+        <div class="control-strip two-column">
+          <label>РАСХОД ГЦК<input id="flow-control" type="range" min="10" max="110" value="35" step="0.5"><output id="flow-output">35.0%</output></label>
+          <label>ПИТАТ. ВОДА<input id="feedwater-control" type="range" min="0" max="110" value="35" step="0.5"><output id="feedwater-output">35.0%</output></label>
+          <label>УРОВЕНЬ БС<input id="level-control" type="range" min="20" max="80" value="50" step="0.5"><output id="level-output">50.0%</output></label>
+          <label>БАЙПАС БРОУ-К<input id="bypass-control" type="range" min="0" max="100" value="0" step="1"><output id="bypass-output">0%</output></label>
+        </div>
+      </section>
+
+      <section class="desk siut-desk">
+        <div class="desk-label"><b>СИУТ</b><span>СТАРШИЙ ИНЖЕНЕР УПРАВЛЕНИЯ ТУРБИНОЙ</span></div>
+        <div class="instrument-row">
+          <div class="round-gauge"><span>ОБОРОТЫ<br>об/мин</span><i id="gauge-rpm"></i><b id="rpm-readout">0</b></div>
+          <div class="round-gauge"><span>МОЩНОСТЬ<br>МВт</span><i id="gauge-electric"></i><b id="electric-readout">0</b></div>
+          <div class="round-gauge"><span>ЧАСТОТА<br>Гц</span><i id="gauge-frequency"></i><b id="frequency-readout">0.00</b></div>
+        </div>
+        <div class="control-strip">
+          <label>РЕГУЛИР. КЛАПАН<input id="valve-control" type="range" min="0" max="100" value="0" step="0.5"><output id="valve-output">0.0%</output></label>
+          <label>НАПРЯЖЕНИЕ<output id="voltage-output">0.0 кВ</output></label>
+        </div>
+        <div class="switch-cluster">
+          <button id="breaker-button" class="knife-switch"><i></i><span>ВЫКЛЮЧАТЕЛЬ<br>ГЕНЕРАТОРА</span></button>
+          <button id="trip-button" class="trip-button">СТОП ТУРБИНЫ</button>
+        </div>
+      </section>
+    </section>
+
+    <section class="lower-strip">
+      <div class="trend-panel"><canvas id="trend-canvas"></canvas></div>
+      <div class="reactivity-ledger">
+        <span>СУЗ <b id="rho-rods">0</b></span><span>ПАР <b id="rho-void">0</b></span><span>ТЕМП. <b id="rho-temp">0</b></span><span>Xe <b id="rho-xe">0</b></span><span>Σρ <b id="rho-total">0</b></span>
+      </div>
+      <div class="event-tape"><div id="event-log"></div></div>
+    </section>
   </main>
 `;
 
 const client = new SimulationClient();
 const trends: TrendPoint[] = [];
-const events: string[] = ["Simulation worker starting"];
-let paused = false;
+const events: string[] = ["БЩУ: запуск вычислительного ядра"];
 let selectedField: CoreField = "power";
 let lastSnapshot: ReactorSnapshot | undefined;
 let lastTrendTime = -1;
-let lastAlarmIds = new Set<string>();
+let paused = false;
+let pumps = 2;
+let feedPumps = 1;
+let breakerClosed = false;
 
 const byId = <T extends HTMLElement>(id: string): T => {
   const element = document.getElementById(id);
@@ -78,68 +168,67 @@ const byId = <T extends HTMLElement>(id: string): T => {
   return element as T;
 };
 
-const controls = {
-  rod: byId<HTMLInputElement>("rod-control"),
-  flow: byId<HTMLInputElement>("flow-control"),
-  feedwater: byId<HTMLInputElement>("feedwater-control"),
-  valve: byId<HTMLInputElement>("valve-control"),
-};
-
-function bindControl(input: HTMLInputElement, outputId: string, key: "rodTarget" | "coolantFlowTarget" | "feedwaterTarget" | "turbineValveTarget"): void {
+function bindRange(id: string, outputId: string, key: "rodTarget" | "coolantFlowTarget" | "feedwaterTarget" | "separatorLevelTarget" | "bypassValveTarget" | "turbineValveTarget"): void {
+  const input = byId<HTMLInputElement>(id);
   input.addEventListener("input", () => {
     const value = Number(input.value);
-    byId<HTMLOutputElement>(outputId).value = `${value.toFixed(1)}%`;
+    byId<HTMLOutputElement>(outputId).value = `${value.toFixed(key === "bypassValveTarget" ? 0 : 1)}%`;
     client.setControls({ [key]: value });
   });
 }
 
-bindControl(controls.rod, "rod-output", "rodTarget");
-bindControl(controls.flow, "flow-output", "coolantFlowTarget");
-bindControl(controls.feedwater, "feedwater-output", "feedwaterTarget");
-bindControl(controls.valve, "valve-output", "turbineValveTarget");
+bindRange("rod-control", "rod-output", "rodTarget");
+bindRange("flow-control", "flow-output", "coolantFlowTarget");
+bindRange("feedwater-control", "feedwater-output", "feedwaterTarget");
+bindRange("level-control", "level-output", "separatorLevelTarget");
+bindRange("bypass-control", "bypass-output", "bypassValveTarget");
+bindRange("valve-control", "valve-output", "turbineValveTarget");
 
 byId<HTMLSelectElement>("core-field").addEventListener("change", (event) => {
   selectedField = (event.currentTarget as HTMLSelectElement).value as CoreField;
   if (lastSnapshot) renderCore(lastSnapshot);
 });
 
-byId<HTMLButtonElement>("az5-button").addEventListener("click", () => {
-  client.setControls({ az5: true, rodTarget: 100 });
-  controls.rod.value = "100";
-  byId<HTMLOutputElement>("rod-output").value = "100.0%";
-  events.unshift("AZ-5 emergency protection activated");
+byId("mcp-buttons").addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-pump]");
+  if (!button) return;
+  const n = Number(button.dataset.pump);
+  pumps = n <= pumps ? n - 1 : n;
+  pumps = Math.max(0, Math.min(8, pumps));
+  client.setControls({ mainCirculationPumps: pumps });
+  events.unshift(`ГЦН: в работе ${pumps}`);
+  updatePumpButtons();
 });
 
-byId<HTMLButtonElement>("pause-button").addEventListener("click", (event) => {
-  paused = !paused;
-  client.setPaused(paused);
-  (event.currentTarget as HTMLButtonElement).textContent = paused ? "RESUME" : "PAUSE";
-  events.unshift(paused ? "Simulation paused" : "Simulation resumed");
+byId("fwp-buttons").addEventListener("click", (event) => {
+  const button = (event.target as HTMLElement).closest<HTMLButtonElement>("button[data-fwp]");
+  if (!button) return;
+  const n = Number(button.dataset.fwp);
+  feedPumps = n <= feedPumps ? n - 1 : n;
+  feedPumps = Math.max(0, Math.min(3, feedPumps));
+  client.setControls({ feedwaterPumps: feedPumps });
+  events.unshift(`ПЭН: в работе ${feedPumps}`);
+  updatePumpButtons();
 });
 
-byId<HTMLButtonElement>("reset-button").addEventListener("click", () => {
-  client.reset();
-  Object.assign(controls.rod, { value: "100" });
-  Object.assign(controls.flow, { value: "35" });
-  Object.assign(controls.feedwater, { value: "35" });
-  Object.assign(controls.valve, { value: "0" });
-  byId<HTMLOutputElement>("rod-output").value = "100.0%";
-  byId<HTMLOutputElement>("flow-output").value = "35.0%";
-  byId<HTMLOutputElement>("feedwater-output").value = "35.0%";
-  byId<HTMLOutputElement>("valve-output").value = "0.0%";
-  trends.length = 0;
-  lastTrendTime = -1;
-  events.unshift("Plant state reset");
-});
+function updatePumpButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>("[data-pump]").forEach((button) => button.classList.toggle("running", Number(button.dataset.pump) <= pumps));
+  document.querySelectorAll<HTMLButtonElement>("[data-fwp]").forEach((button) => button.classList.toggle("running", Number(button.dataset.fwp) <= feedPumps));
+}
+updatePumpButtons();
 
-client.onStatus((message) => {
-  byId("runtime-status").textContent = message;
-  events.unshift(message);
-});
+byId("az1-button").addEventListener("click", () => { client.setControls({ rodTarget: Math.min(100, Number(byId<HTMLInputElement>("rod-control").value) + 10) }); events.unshift("АЗ-1: снижение мощности"); });
+byId("az2-button").addEventListener("click", () => { client.setControls({ rodTarget: Math.min(100, Number(byId<HTMLInputElement>("rod-control").value) + 25) }); events.unshift("АЗ-2: ускоренное снижение мощности"); });
+byId("az5-button").addEventListener("click", () => { client.setControls({ az5: true, rodTarget: 100 }); byId<HTMLInputElement>("rod-control").value = "100"; byId<HTMLOutputElement>("rod-output").value = "100.0%"; events.unshift("АЗ-5: аварийная защита введена"); });
+byId("trip-button").addEventListener("click", () => { client.setControls({ turbineTrip: true }); breakerClosed = false; events.unshift("ТУРБИНА: стопорные клапаны закрыты"); });
+byId("breaker-button").addEventListener("click", () => { breakerClosed = !breakerClosed; client.setControls({ generatorBreakerClosed: breakerClosed, turbineTrip: false }); byId("breaker-button").classList.toggle("closed", breakerClosed); events.unshift(`ГЕНЕРАТОР: выключатель ${breakerClosed ? "включен" : "отключен"}`); });
+byId("pause-button").addEventListener("click", () => { paused = !paused; client.setPaused(paused); byId("pause-button").textContent = paused ? "ПУСК" : "ПАУЗА"; });
+byId("reset-button").addEventListener("click", () => { client.reset(); trends.length = 0; events.unshift("БЛОК: состояние сброшено"); });
 
+client.onStatus((status) => { byId("runtime-status").textContent = status; });
 client.onSnapshot((snapshot) => {
   lastSnapshot = snapshot;
-  if (snapshot.time - lastTrendTime >= 0.25 || lastTrendTime < 0) {
+  if (lastTrendTime < 0 || snapshot.time - lastTrendTime >= 0.25) {
     trends.push({ time: snapshot.time, power: snapshot.neutronPowerPercent, pressure: snapshot.steamPressureMPa, temperature: snapshot.fuelTemperatureC });
     if (trends.length > 360) trends.shift();
     lastTrendTime = snapshot.time;
@@ -147,27 +236,53 @@ client.onSnapshot((snapshot) => {
   render(snapshot);
 });
 
-function render(snapshot: ReactorSnapshot): void {
-  const metrics = [
-    ["THERMAL POWER", snapshot.thermalPowerMW, "MWt", 0], ["ELECTRIC OUTPUT", snapshot.electricPowerMW, "MWe", 0],
-    ["STEAM PRESSURE", snapshot.steamPressureMPa, "MPa", 2], ["STEAM FLOW", snapshot.steamFlowKgS, "kg/s", 0],
-    ["FUEL TEMPERATURE", snapshot.fuelTemperatureC, "°C", 0], ["TURBINE SPEED", snapshot.turbineRpm, "rpm", 0],
-  ] as const;
-  byId("metrics").innerHTML = metrics.map(([label, value, unit, digits]) => `<article class="metric-card"><span>${label}</span><strong>${value.toFixed(digits)}</strong><small>${unit}</small></article>`).join("");
+function setGauge(id: string, value: number, min: number, max: number): void {
+  const normalized = Math.max(0, Math.min(1, (value - min) / (max - min)));
+  byId(id).style.transform = `rotate(${-132 + normalized * 264}deg)`;
+}
 
-  const pill = byId("mode-pill");
-  pill.textContent = snapshot.mode.toUpperCase();
-  pill.className = `mode-pill mode-${snapshot.mode}`;
-  setPcm("reactivity-value", snapshot.reactivity.total);
-  setPcm("rod-reactivity", snapshot.reactivity.rods);
-  setPcm("void-reactivity", snapshot.reactivity.voids);
-  setPcm("fuel-reactivity", snapshot.reactivity.fuelTemperature);
-  setPcm("xenon-reactivity", snapshot.reactivity.xenon);
-  byId("period-value").textContent = Math.abs(snapshot.periodSeconds) > 900 ? "∞ s" : `${snapshot.periodSeconds.toFixed(1)} s`;
-  byId("sim-time").textContent = `T+${formatTime(snapshot.time)}`;
+function render(snapshot: ReactorSnapshot): void {
+  const modeLabels = { shutdown: "ОСТАНОВ", startup: "ПУСК", power: "МОЩНОСТЬ", scram: "АЗ-5" } as const;
+  byId("mode-indicator").textContent = modeLabels[snapshot.mode];
+  byId("wall-clock").textContent = formatTime(snapshot.time);
+  byId("power-value").textContent = `${snapshot.neutronPowerPercent.toFixed(1)}%`;
+  byId("period-value").textContent = Math.abs(snapshot.periodSeconds) > 900 ? "∞" : snapshot.periodSeconds.toFixed(1);
+  byId("reactivity-value").textContent = `${snapshot.reactivityPcm.toFixed(0)} pcm`;
+  byId("power-bar").style.height = `${Math.min(100, snapshot.neutronPowerPercent)}%`;
+  byId("period-bar").style.height = `${Math.min(100, Math.max(0, 100 - Math.abs(snapshot.periodSeconds)))}%`;
+  byId("reactivity-bar").style.height = `${Math.min(100, Math.max(0, 50 + snapshot.reactivityPcm / 20))}%`;
+
+  setGauge("gauge-power", snapshot.neutronPowerPercent, 0, 120);
+  setGauge("gauge-thermal", snapshot.thermalPowerMW, 0, 3400);
+  setGauge("gauge-period", Math.min(100, Math.abs(snapshot.periodSeconds)), 0, 100);
+  setGauge("gauge-rpm", snapshot.turbineRpm, 0, 3300);
+  setGauge("gauge-electric", snapshot.electricPowerMW, 0, 1100);
+  setGauge("gauge-frequency", snapshot.systems.gridFrequencyHz, 0, 52.5);
+
+  byId("gauge-power-readout").textContent = snapshot.neutronPowerPercent.toFixed(1);
+  byId("gauge-thermal-readout").textContent = snapshot.thermalPowerMW.toFixed(0);
+  byId("gauge-period-readout").textContent = Math.abs(snapshot.periodSeconds) > 900 ? "∞" : snapshot.periodSeconds.toFixed(1);
+  byId("rpm-readout").textContent = snapshot.turbineRpm.toFixed(0);
+  byId("electric-readout").textContent = snapshot.electricPowerMW.toFixed(0);
+  byId("frequency-readout").textContent = snapshot.systems.gridFrequencyHz.toFixed(2);
+  byId("voltage-output").textContent = `${snapshot.systems.generatorVoltageKV.toFixed(1)} кВ`;
+  byId("xenon-output").textContent = `${snapshot.xenonPercent.toFixed(1)}%`;
+  byId("void-output").textContent = `${snapshot.voidFractionPercent.toFixed(1)}%`;
+  byId("separator-level").textContent = `${snapshot.systems.separatorLevelPercent.toFixed(1)}%`;
+  byId("steam-pressure").textContent = `${snapshot.steamPressureMPa.toFixed(2)} МПа`;
+  byId("steam-flow").textContent = `${snapshot.steamFlowKgS.toFixed(0)} кг/с`;
+  byId("vacuum-value").textContent = `${snapshot.systems.condenserVacuumKPa.toFixed(0)} кПа`;
+
+  byId("rho-rods").textContent = snapshot.reactivity.rods.toFixed(0);
+  byId("rho-void").textContent = snapshot.reactivity.voids.toFixed(0);
+  byId("rho-temp").textContent = snapshot.reactivity.fuelTemperature.toFixed(0);
+  byId("rho-xe").textContent = snapshot.reactivity.xenon.toFixed(0);
+  byId("rho-total").textContent = snapshot.reactivity.total.toFixed(0);
+
   renderCore(snapshot);
   renderAlarms(snapshot);
   renderTrend();
+  byId("event-log").innerHTML = events.slice(0, 10).map((entry, index) => `<p><time>${index === 0 ? "СЕЙЧАС" : `-${index}`}</time>${entry}</p>`).join("");
 }
 
 function renderCore(snapshot: ReactorSnapshot): void {
@@ -175,68 +290,61 @@ function renderCore(snapshot: ReactorSnapshot): void {
   if (map.children.length !== snapshot.coreCells.length) {
     map.innerHTML = "";
     map.style.gridTemplateColumns = `repeat(${snapshot.coreWidth}, 1fr)`;
-    for (const coreCell of snapshot.coreCells) {
-      const cell = document.createElement("span");
-      cell.className = coreCell.active ? "core-cell" : "core-cell core-cell-empty";
-      cell.title = `Channel ${coreCell.x + 1}-${coreCell.y + 1}`;
-      map.append(cell);
-    }
+    snapshot.coreCells.forEach((cell) => {
+      const node = document.createElement("span");
+      node.className = cell.active ? "core-channel" : "core-channel inactive";
+      map.append(node);
+    });
   }
-
-  snapshot.coreCells.forEach((data, index) => {
-    const cell = map.children[index] as HTMLElement | undefined;
-    if (!cell || !data.active) return;
-    const { level, value } = fieldValue(data, selectedField);
-    cell.style.setProperty("--level", level.toFixed(4));
-    cell.dataset.value = value;
-    cell.title = `Channel ${data.x + 1}-${data.y + 1} · ${value}`;
+  const ranges: Record<CoreField, [number, number]> = { power: [0, 140], fuelTemperature: [250, 900], voidFraction: [0, 85], xenon: [0, 100], rodInsertion: [0, 100] };
+  const [min, max] = ranges[selectedField];
+  snapshot.coreCells.forEach((cell, index) => {
+    const node = map.children[index] as HTMLElement;
+    if (!cell.active) return;
+    const value = cell[selectedField];
+    const level = Math.max(0, Math.min(1, (value - min) / (max - min)));
+    node.style.setProperty("--level", String(level));
+    node.title = `${cell.x + 1}-${cell.y + 1} · ${selectedField}: ${value.toFixed(1)}`;
   });
 }
 
-function fieldValue(cell: ReactorSnapshot["coreCells"][number], field: CoreField): { level: number; value: string } {
-  switch (field) {
-    case "power": return { level: Math.min(cell.power / 1.25, 1.4), value: `${(cell.power * 100).toFixed(1)}% local power` };
-    case "fuelTemperature": return { level: Math.min(Math.max((cell.fuelTemperature - 250) / 650, 0.02), 1.4), value: `${cell.fuelTemperature.toFixed(0)} °C` };
-    case "voidFraction": return { level: Math.min(cell.voidFraction / 70, 1.4), value: `${cell.voidFraction.toFixed(1)}% void` };
-    case "xenon": return { level: Math.min(cell.xenon / 60, 1.4), value: `${cell.xenon.toFixed(1)}% Xe-135` };
-    case "rodInsertion": return { level: Math.min((100 - cell.rodInsertion) / 75, 1.4), value: `${cell.rodInsertion.toFixed(1)}% inserted` };
-  }
-}
-
 function renderAlarms(snapshot: ReactorSnapshot): void {
-  const active = snapshot.alarms.filter((alarm) => alarm.active);
-  const ids = new Set(active.map((alarm) => alarm.id));
-  for (const alarm of active) if (!lastAlarmIds.has(alarm.id)) events.unshift(`${alarm.severity.toUpperCase()}: ${alarm.message}`);
-  lastAlarmIds = ids;
-  byId("alarm-count").textContent = `${active.length} ACTIVE`;
-  byId("alarm-list").innerHTML = snapshot.alarms.map((alarm) => `<div class="alarm ${alarm.active ? `alarm-active alarm-${alarm.severity}` : ""}"><span class="alarm-indicator"></span><strong>${alarm.message}</strong></div>`).join("");
-  byId("event-log").innerHTML = events.slice(0, 10).map((entry, index) => `<p><time>${index === 0 ? "NOW" : `-${index}`}</time>${entry}</p>`).join("");
+  const activeMessages = new Set(snapshot.alarms.filter((alarm) => alarm.active).map((alarm) => alarm.message));
+  document.querySelectorAll<HTMLElement>(".annunciator").forEach((node) => {
+    const active = activeMessages.has(node.textContent?.trim() ?? "");
+    node.classList.toggle("active", active);
+    node.classList.toggle("critical", snapshot.alarms.some((alarm) => alarm.active && alarm.message === node.textContent?.trim() && alarm.severity === "critical"));
+  });
+  for (const alarm of snapshot.alarms) {
+    if (alarm.active && !events[0]?.includes(alarm.message)) events.unshift(`СИГНАЛ: ${alarm.message}`);
+  }
 }
 
 function renderTrend(): void {
   const canvas = byId<HTMLCanvasElement>("trend-canvas");
-  const context = canvas.getContext("2d");
-  if (!context) return;
-  const dpr = Math.max(1, window.devicePixelRatio);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return;
+  const dpr = Math.max(1, devicePixelRatio);
   const width = canvas.clientWidth;
   const height = canvas.clientHeight;
   if (canvas.width !== width * dpr || canvas.height !== height * dpr) { canvas.width = width * dpr; canvas.height = height * dpr; }
-  context.setTransform(dpr, 0, 0, dpr, 0, 0);
-  context.clearRect(0, 0, width, height);
-  context.strokeStyle = "rgba(128, 190, 159, 0.12)";
-  for (let i = 1; i < 5; i += 1) { const y = height / 5 * i; context.beginPath(); context.moveTo(0, y); context.lineTo(width, y); context.stroke(); }
-  drawLine(context, trends.map((p) => p.power / 120), width, height, "#75f0af");
-  drawLine(context, trends.map((p) => p.pressure / 8), width, height, "#f0c96d");
-  drawLine(context, trends.map((p) => p.temperature / 900), width, height, "#ef816c");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, width, height);
+  ctx.strokeStyle = "rgba(35,55,40,.35)";
+  for (let i = 1; i < 6; i += 1) { ctx.beginPath(); ctx.moveTo(0, height * i / 6); ctx.lineTo(width, height * i / 6); ctx.stroke(); }
+  drawTrace(ctx, trends.map((p) => p.power / 120), width, height, "#183d22");
+  drawTrace(ctx, trends.map((p) => p.pressure / 8), width, height, "#7b301e");
+  drawTrace(ctx, trends.map((p) => p.temperature / 900), width, height, "#755b16");
 }
 
-function drawLine(context: CanvasRenderingContext2D, values: number[], width: number, height: number, color: string): void {
+function drawTrace(ctx: CanvasRenderingContext2D, values: number[], width: number, height: number, color: string): void {
   if (values.length < 2) return;
-  context.strokeStyle = color; context.lineWidth = 2; context.beginPath();
-  values.forEach((value, index) => { const x = index / Math.max(values.length - 1, 1) * width; const y = height - Math.min(Math.max(value, 0), 1.2) * height * 0.82 - 12; index === 0 ? context.moveTo(x, y) : context.lineTo(x, y); });
-  context.stroke();
+  ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.beginPath();
+  values.forEach((value, index) => { const x = index / (values.length - 1) * width; const y = height - Math.max(0, Math.min(1, value)) * height; index ? ctx.lineTo(x, y) : ctx.moveTo(x, y); });
+  ctx.stroke();
 }
 
-function setPcm(id: string, value: number): void { byId(id).textContent = `${value >= 0 ? "+" : ""}${value.toFixed(0)} pcm`; }
-function formatTime(seconds: number): string { const total = Math.floor(seconds); return `${Math.floor(total / 3600).toString().padStart(2, "0")}:${Math.floor(total % 3600 / 60).toString().padStart(2, "0")}:${(total % 60).toString().padStart(2, "0")}`; }
-window.addEventListener("beforeunload", () => client.dispose());
+function formatTime(seconds: number): string {
+  const total = Math.floor(seconds);
+  return [Math.floor(total / 3600), Math.floor(total % 3600 / 60), total % 60].map((n) => String(n).padStart(2, "0")).join(":");
+}
