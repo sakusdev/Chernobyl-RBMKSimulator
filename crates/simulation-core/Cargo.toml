@@ -1,0 +1,19 @@
+[package]
+name = "rbmk-simulation-core"
+version = "0.1.0"
+edition = "2024"
+description = "WebAssembly-ready numerical core for the RBMK educational simulator"
+license = "MIT"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+
+[profile.release]
+lto = true
+codegen-units = 1
+opt-level = "s"
+panic = "abort"
