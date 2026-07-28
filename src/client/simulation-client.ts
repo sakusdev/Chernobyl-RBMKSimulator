@@ -16,6 +16,9 @@ export class SimulationClient {
         case "ready":
           for (const listener of this.statusListeners) listener(`${event.data.backend.toUpperCase()} CORE READY · Δt ${event.data.fixedStepSeconds.toFixed(3)} s`);
           break;
+        case "speed":
+          for (const listener of this.statusListeners) listener(`SIMULATION SPEED · ${event.data.multiplier.toFixed(2)}×`);
+          break;
         case "error":
           for (const listener of this.statusListeners) listener(`SIMULATION ERROR · ${event.data.message}`);
           break;
@@ -40,6 +43,10 @@ export class SimulationClient {
 
   public setPaused(paused: boolean): void {
     this.send({ type: "pause", paused });
+  }
+
+  public setSpeed(multiplier: number): void {
+    this.send({ type: "speed", multiplier });
   }
 
   public reset(): void {
