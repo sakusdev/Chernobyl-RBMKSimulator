@@ -1,8 +1,10 @@
 export type OperatingMode = "shutdown" | "startup" | "power" | "scram";
 export type CoreField = "power" | "fuelTemperature" | "voidFraction" | "xenon" | "rodInsertion";
+export type RodBankTuple = [number, number, number, number];
 
 export interface ControlInput {
   rodTarget: number;
+  rodBankTargets: RodBankTuple;
   coolantFlowTarget: number;
   feedwaterTarget: number;
   turbineValveTarget: number;
@@ -36,6 +38,7 @@ export interface CoreCellSnapshot {
   x: number;
   y: number;
   active: boolean;
+  bankIndex: 0 | 1 | 2 | 3;
   power: number;
   fuelTemperature: number;
   voidFraction: number;
@@ -63,6 +66,8 @@ export interface ReactorSnapshot {
   reactivityPcm: number;
   reactivity: ReactivityBreakdown;
   rodInsertionPercent: number;
+  rodBankPositions: RodBankTuple;
+  rodBankSpreadPercent: number;
   coolantFlowPercent: number;
   coolantTemperatureC: number;
   fuelTemperatureC: number;
@@ -76,6 +81,8 @@ export interface ReactorSnapshot {
   coreWidth: number;
   coreHeight: number;
   coreCells: CoreCellSnapshot[];
+  corePeakFactor: number;
+  corePeakChannelIndex: number;
   alarms: Alarm[];
 }
 
