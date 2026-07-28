@@ -1,15 +1,27 @@
 import { SixGroupPointKinetics } from "./kinetics";
 import { SpatialCoreModel } from "./spatial-core";
-import type { Alarm, ControlInput, OperatingMode, ReactivityBreakdown, ReactorSnapshot } from "./types";
+import type { Alarm, ControlInput, OperatingMode, ReactivityBreakdown, ReactorSnapshot, RodBankTuple } from "./types";
 
 const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 const approach = (value: number, target: number, ratePerSecond: number, dt: number): number => {
   const delta = target - value;
   return value + clamp(delta, -ratePerSecond * dt, ratePerSecond * dt);
 };
+const average = (values: readonly number[]): number => values.reduce((sum, value) => sum + value, 0) / Math.max(values.length, 1);
+const bankSpread = (values: readonly number[]): number => Math.max(...values) - Math.min(...values);
+const normaliseBanks = (values: readonly number[] | undefined, fallback: RodBankTuple): RodBankTuple => {
+  if (!values || values.length !== 4) return [...fallback] as RodBankTuple;
+  return [
+    clamp(values[0] ?? fallback[0], 0, 100),
+    clamp(values[1] ?? fallback[1], 0, 100),
+    clamp(values[2] ?? fallback[2], 0, 100),
+    clamp(values[3] ?? fallback[3], 0, 100),
+  ];
+};
 
 const defaultControls = (): ControlInput => ({
   rodTarget: 100,
+  rodBankTargets: [100, 100, 100, 100],
   coolantFlowTarget: 35,
   feedwaterTarget: 35,
   turbineValveTarget: 0,
@@ -28,6 +40,7 @@ export class ReactorSimulation {
   private thermalPower = 0.1;
   private electricPower = 0;
   private rodInsertion = 100;
+  private rodBankPositions: RodBankTuple = [100, 100, 100, 100];
   private coolantFlow = 35;
   private coolantTemperature = 265;
   private fuelTemperature = 290;
@@ -47,10 +60,19 @@ export class ReactorSimulation {
   private controls: ControlInput = defaultControls();
 
   public setControls(next: Partial<ControlInput>): void {
+    const explicitBanks = next.rodBankTargets;
+    const masterTarget = clamp(next.rodTarget ?? this.controls.rodTarget, 0, 100);
+    const bankTargets = explicitBanks
+      ? normaliseBanks(explicitBanks, this.controls.rodBankTargets)
+      : next.rodTarget !== undefined
+        ? [masterTarget, masterTarget, masterTarget, masterTarget] as RodBankTuple
+        : [...this.controls.rodBankTargets] as RodBankTuple;
+
     this.controls = {
       ...this.controls,
       ...next,
-      rodTarget: clamp(next.rodTarget ?? this.controls.rodTarget, 0, 100),
+      rodTarget: explicitBanks ? average(bankTargets) : masterTarget,
+      rodBankTargets: bankTargets,
       coolantFlowTarget: clamp(next.coolantFlowTarget ?? this.controls.coolantFlowTarget, 10, 110),
       feedwaterTarget: clamp(next.feedwaterTarget ?? this.controls.feedwaterTarget, 0, 110),
       turbineValveTarget: clamp(next.turbineValveTarget ?? this.controls.turbineValveTarget, 0, 100),
@@ -67,6 +89,7 @@ export class ReactorSimulation {
     this.thermalPower = 0.1;
     this.electricPower = 0;
     this.rodInsertion = 100;
+    this.rodBankPositions = [100, 100, 100, 100];
     this.coolantFlow = 35;
     this.coolantTemperature = 265;
     this.fuelTemperature = 290;
@@ -92,6 +115,7 @@ export class ReactorSimulation {
 
     if (this.controls.az5) {
       this.controls.rodTarget = 100;
+      this.controls.rodBankTargets = [100, 100, 100, 100];
       this.mode = "scram";
     }
     if (this.controls.turbineTrip) {
@@ -99,7 +123,12 @@ export class ReactorSimulation {
       this.controls.generatorBreakerClosed = false;
     }
 
-    this.rodInsertion = approach(this.rodInsertion, this.controls.rodTarget, this.controls.az5 ? 24 : 1.8, safeDt);
+    const rodRate = this.controls.az5 ? 24 : 1.8;
+    this.rodBankPositions = this.rodBankPositions.map((position, index) => (
+      approach(position, this.controls.rodBankTargets[index] ?? this.controls.rodTarget, rodRate, safeDt)
+    )) as RodBankTuple;
+    this.rodInsertion = average(this.rodBankPositions);
+
     const pumpFlow = this.controls.mainCirculationPumps * 12.5;
     const requestedFlow = Math.min(this.controls.coolantFlowTarget, pumpFlow + 10);
     this.coolantFlow = approach(this.coolantFlow, requestedFlow, 4.2, safeDt);
@@ -148,6 +177,7 @@ export class ReactorSimulation {
       averageVoidFractionPercent: this.voidFraction,
       averageXenonPercent: this.xenon,
       averageRodInsertionPercent: this.rodInsertion,
+      rodBankInsertions: this.rodBankPositions,
       coolantFlowPercent: this.coolantFlow,
     }, safeDt);
 
@@ -179,6 +209,7 @@ export class ReactorSimulation {
   }
 
   private snapshot(reactivity: ReactivityBreakdown): ReactorSnapshot {
+    const diagnostics = this.spatialCore.getDiagnostics();
     return {
       time: this.time,
       mode: this.mode,
@@ -188,6 +219,8 @@ export class ReactorSimulation {
       reactivityPcm: reactivity.total,
       reactivity,
       rodInsertionPercent: this.rodInsertion,
+      rodBankPositions: [...this.rodBankPositions] as RodBankTuple,
+      rodBankSpreadPercent: bankSpread(this.rodBankPositions),
       coolantFlowPercent: this.coolantFlow,
       coolantTemperatureC: this.coolantTemperature,
       fuelTemperatureC: this.fuelTemperature,
@@ -210,11 +243,15 @@ export class ReactorSimulation {
       coreWidth: this.spatialCore.width,
       coreHeight: this.spatialCore.height,
       coreCells: this.spatialCore.snapshot(),
+      corePeakFactor: diagnostics.peakFactor,
+      corePeakChannelIndex: diagnostics.peakChannelIndex,
       alarms: this.buildAlarms(),
     };
   }
 
   private buildAlarms(): Alarm[] {
+    const diagnostics = this.spatialCore.getDiagnostics();
+    const spread = bankSpread(this.rodBankPositions);
     return [
       { id: "high-power", severity: "critical", message: "МОЩНОСТЬ РЕАКТОРА ВЫСОКА", active: this.neutronPower > 108 },
       { id: "short-period", severity: "critical", message: "МАЛЫЙ ПЕРИОД РЕАКТОРА", active: this.periodSeconds > 0 && this.periodSeconds < 10 },
@@ -224,6 +261,8 @@ export class ReactorSimulation {
       { id: "high-level", severity: "warning", message: "УРОВЕНЬ БС ВЫСОКИЙ", active: this.separatorLevel > 75 },
       { id: "high-fuel-temp", severity: "warning", message: "ТЕМПЕРАТУРА ТОПЛИВА ВЫСОКА", active: this.fuelTemperature > 760 },
       { id: "high-void", severity: "warning", message: "ПАРОСОДЕРЖАНИЕ ВЫСОКО", active: this.voidFraction > 55 },
+      { id: "rod-bank-deviation", severity: spread > 22 ? "critical" : "warning", message: "制御棒バンク偏差大", active: spread > 12 },
+      { id: "local-power-peak", severity: diagnostics.peakFactor > 1.72 ? "critical" : "warning", message: "局所出力ピーク高", active: this.neutronPower > 8 && diagnostics.peakFactor > 1.48 },
       { id: "turbine-overspeed", severity: "critical", message: "РАЗГОН ТУРБИНЫ", active: this.turbineRpm > 3060 },
       { id: "low-vacuum", severity: "warning", message: "ВАКУУМ КОНДЕНСАТОРА НИЗКИЙ", active: this.condenserVacuum < 55 && this.turbineRpm > 500 },
       { id: "generator-unsynchronised", severity: "warning", message: "ГЕНЕРАТОР НЕ СИНХРОНИЗИРОВАН", active: this.controls.generatorBreakerClosed && Math.abs(this.gridFrequency - 50) > 0.25 },

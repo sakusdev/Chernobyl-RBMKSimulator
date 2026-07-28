@@ -11,7 +11,11 @@ const alarmLabels: Record<string, string> = {
   "復水器真空低": "ВАКУУМ КОНДЕНСАТОРА НИЗКИЙ",
   "発電機未同期": "ГЕНЕРАТОР НЕ СИНХРОНИЗИРОВАН",
   "AZ-5作動": "АЗ-5 ВВЕДЕНА",
+  "制御棒バンク偏差大": "制御棒バンク偏差大",
+  "局所出力ピーク高": "局所出力ピーク高",
 };
+
+const extraAlarmLabels = ["制御棒バンク偏差大", "局所出力ピーク高"] as const;
 
 const eventTranslations: Array<[RegExp, string]> = [
   [/警報\s*:\s*РАЗГОН ТУРБИНЫ/g, "警報：タービン過速度"],
@@ -28,7 +32,21 @@ const eventTranslations: Array<[RegExp, string]> = [
   [/警報\s*:\s*АЗ-5 ВВЕДЕНА/g, "警報：AZ-5作動"],
 ];
 
+function ensureExtendedAlarmWindows(): void {
+  const grid = document.querySelector<HTMLElement>("#annunciator-grid");
+  if (!grid) return;
+  for (const label of extraAlarmLabels) {
+    if (grid.querySelector(`[data-extra-alarm="${label}"]`)) continue;
+    const node = document.createElement("div");
+    node.className = "annunciator";
+    node.dataset.extraAlarm = label;
+    node.textContent = label;
+    grid.append(node);
+  }
+}
+
 function installAlarmCompatibility(): void {
+  ensureExtendedAlarmWindows();
   const nodes = document.querySelectorAll<HTMLElement>(".annunciator");
   if (!nodes.length) return;
 
