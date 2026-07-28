@@ -87,7 +87,7 @@ const phraseTranslations: Array<[RegExp, string]> = [
   [/SIMULATION ERROR/g, "シミュレーションエラー"],
   [/TYPESCRIPT CORE READY/g, "TypeScript計算コア準備完了"],
   [/WASM CORE READY/g, "WASM計算コア準備完了"],
-]);
+];
 
 function translateText(text: string): string {
   const trimmed = text.trim();
