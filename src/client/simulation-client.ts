@@ -6,7 +6,7 @@ export class SimulationClient {
   private snapshotListeners = new Set<(snapshot: ReactorSnapshot) => void>();
   private statusListeners = new Set<(message: string) => void>();
 
-  constructor(): void {
+  constructor() {
     this.worker = new Worker(new URL("../sim/simulation.worker.ts", import.meta.url), { type: "module" });
     this.worker.addEventListener("message", (event: MessageEvent<SimulationEvent>) => {
       switch (event.data.type) {
