@@ -6,6 +6,12 @@ export interface ControlInput {
   coolantFlowTarget: number;
   feedwaterTarget: number;
   turbineValveTarget: number;
+  bypassValveTarget: number;
+  mainCirculationPumps: number;
+  feedwaterPumps: number;
+  separatorLevelTarget: number;
+  generatorBreakerClosed: boolean;
+  turbineTrip: boolean;
   az5: boolean;
 }
 
@@ -37,6 +43,17 @@ export interface CoreCellSnapshot {
   rodInsertion: number;
 }
 
+export interface PlantSystemSnapshot {
+  mainCirculationPumps: number;
+  feedwaterPumps: number;
+  separatorLevelPercent: number;
+  bypassValvePercent: number;
+  condenserVacuumKPa: number;
+  generatorBreakerClosed: boolean;
+  gridFrequencyHz: number;
+  generatorVoltageKV: number;
+}
+
 export interface ReactorSnapshot {
   time: number;
   mode: OperatingMode;
@@ -55,6 +72,7 @@ export interface ReactorSnapshot {
   xenonPercent: number;
   turbineRpm: number;
   periodSeconds: number;
+  systems: PlantSystemSnapshot;
   coreWidth: number;
   coreHeight: number;
   coreCells: CoreCellSnapshot[];
