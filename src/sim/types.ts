@@ -1,4 +1,5 @@
 export type OperatingMode = "shutdown" | "startup" | "power" | "scram";
+export type CoreField = "power" | "fuelTemperature" | "voidFraction" | "xenon" | "rodInsertion";
 
 export interface ControlInput {
   rodTarget: number;
@@ -15,6 +16,27 @@ export interface Alarm {
   active: boolean;
 }
 
+export interface ReactivityBreakdown {
+  shutdown: number;
+  rods: number;
+  voids: number;
+  fuelTemperature: number;
+  xenon: number;
+  total: number;
+}
+
+export interface CoreCellSnapshot {
+  index: number;
+  x: number;
+  y: number;
+  active: boolean;
+  power: number;
+  fuelTemperature: number;
+  voidFraction: number;
+  xenon: number;
+  rodInsertion: number;
+}
+
 export interface ReactorSnapshot {
   time: number;
   mode: OperatingMode;
@@ -22,6 +44,7 @@ export interface ReactorSnapshot {
   electricPowerMW: number;
   neutronPowerPercent: number;
   reactivityPcm: number;
+  reactivity: ReactivityBreakdown;
   rodInsertionPercent: number;
   coolantFlowPercent: number;
   coolantTemperatureC: number;
@@ -32,6 +55,9 @@ export interface ReactorSnapshot {
   xenonPercent: number;
   turbineRpm: number;
   periodSeconds: number;
+  coreWidth: number;
+  coreHeight: number;
+  coreCells: CoreCellSnapshot[];
   alarms: Alarm[];
 }
 
