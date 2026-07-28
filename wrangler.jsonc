@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "chernobyl-rbmk-simulator",
+  "name": "chernobyl-rbmksimulator",
   "main": "src/worker.ts",
   "compatibility_date": "2026-07-28",
   "assets": {
