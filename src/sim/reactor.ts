@@ -1,7 +1,7 @@
+import { SixGroupPointKinetics } from "./kinetics";
 import type { Alarm, ControlInput, OperatingMode, ReactorSnapshot } from "./types";
 
-const clamp = (value: number, min: number, max: number): number =>
-  Math.min(max, Math.max(min, value));
+const clamp = (value: number, min: number, max: number): number => Math.min(max, Math.max(min, value));
 
 const approach = (value: number, target: number, ratePerSecond: number, dt: number): number => {
   const delta = target - value;
@@ -23,8 +23,9 @@ export class ReactorSimulation {
   private voidFraction = 0;
   private xenon = 18;
   private turbineRpm = 0;
-  private periodSeconds = 999;
+  private periodSeconds = Number.POSITIVE_INFINITY;
   private mode: OperatingMode = "shutdown";
+  private readonly kinetics = new SixGroupPointKinetics(0.0001);
   private controls: ControlInput = {
     rodTarget: 100,
     coolantFlowTarget: 35,
@@ -58,8 +59,9 @@ export class ReactorSimulation {
     this.voidFraction = 0;
     this.xenon = 18;
     this.turbineRpm = 0;
-    this.periodSeconds = 999;
+    this.periodSeconds = Number.POSITIVE_INFINITY;
     this.mode = "shutdown";
+    this.kinetics.reset(0.0001);
     this.controls = {
       rodTarget: 100,
       coolantFlowTarget: 35,
@@ -70,7 +72,7 @@ export class ReactorSimulation {
   }
 
   public step(dt: number): ReactorSnapshot {
-    const safeDt = clamp(dt, 0.001, 0.25);
+    const safeDt = clamp(dt, 0.001, 0.1);
     this.time += safeDt;
 
     if (this.controls.az5) {
@@ -82,28 +84,18 @@ export class ReactorSimulation {
     this.rodInsertion = approach(this.rodInsertion, this.controls.rodTarget, rodRate, safeDt);
     this.coolantFlow = approach(this.coolantFlow, this.controls.coolantFlowTarget, 3.5, safeDt);
 
-    const rodReactivity = (64 - this.rodInsertion) * 17;
-    const voidReactivity = Math.max(0, this.voidFraction - 4) * 9.5;
-    const temperatureFeedback = -(this.fuelTemperature - 300) * 1.7;
-    const xenonFeedback = -(this.xenon - 15) * 7.5;
-    const shutdownBias = -520;
-    const reactivityPcm = shutdownBias + rodReactivity + voidReactivity + temperatureFeedback + xenonFeedback;
-
-    const previousPower = this.neutronPower;
-    const promptGain = clamp(reactivityPcm / 4500, -1.4, 0.65);
-    const source = 0.000018;
-    this.neutronPower = clamp(
-      this.neutronPower + (this.neutronPower * promptGain * 2.1 + source) * safeDt,
-      0.00001,
-      180,
-    );
+    const reactivityPcm = this.calculateReactivityPcm();
+    const kinetics = this.kinetics.step(reactivityPcm * 1e-5, safeDt, 1.8e-8);
+    this.neutronPower = clamp(kinetics.neutronDensity, 0.00001, 180);
+    this.periodSeconds = clamp(kinetics.periodSeconds, -9999, 9999);
 
     const targetThermal = this.neutronPower * 32;
     this.thermalPower = approach(this.thermalPower, targetThermal, 180 + targetThermal * 0.22, safeDt);
 
     const heatInput = this.thermalPower / 3200;
     const flowCooling = this.coolantFlow / 100;
-    const targetCoolantTemp = 255 + heatInput * 52 - flowCooling * 7;
+    const feedwaterCooling = this.controls.feedwaterTarget / 100;
+    const targetCoolantTemp = 255 + heatInput * 52 - flowCooling * 7 - feedwaterCooling * 2.5;
     this.coolantTemperature = approach(this.coolantTemperature, targetCoolantTemp, 5.2, safeDt);
 
     const targetFuelTemp = this.coolantTemperature + 25 + heatInput * 510;
@@ -111,16 +103,16 @@ export class ReactorSimulation {
 
     const boilingDrive = clamp((this.coolantTemperature - 274) / 18, 0, 1.4);
     const flowSuppression = clamp(this.coolantFlow / 105, 0.1, 1.2);
-    const targetVoid = clamp(boilingDrive * 58 / flowSuppression, 0, 85);
+    const targetVoid = clamp((boilingDrive * 58) / flowSuppression, 0, 85);
     this.voidFraction = approach(this.voidFraction, targetVoid, 12, safeDt);
 
     this.steamFlow = clamp(this.thermalPower * 0.52 * (0.3 + this.voidFraction / 100), 0, 1900);
-    const pressureTarget = 2.0 + clamp(this.steamFlow / 1750, 0, 1.2) * 5.1;
-    const valveRelief = this.controls.turbineValveTarget / 100 * 0.65;
+    const pressureTarget = 2 + clamp(this.steamFlow / 1750, 0, 1.2) * 5.1;
+    const valveRelief = (this.controls.turbineValveTarget / 100) * 0.65;
     this.steamPressure = approach(this.steamPressure, pressureTarget - valveRelief, 0.28, safeDt);
 
     const availableTorque = this.steamFlow * (this.controls.turbineValveTarget / 100);
-    const rpmTarget = clamp(availableTorque * 2.15, 0, 3000);
+    const rpmTarget = clamp(availableTorque * 2.15, 0, 3150);
     this.turbineRpm = approach(this.turbineRpm, rpmTarget, 95, safeDt);
     const rpmEfficiency = clamp(this.turbineRpm / 3000, 0, 1);
     this.electricPower = clamp(this.steamFlow * 0.69 * rpmEfficiency, 0, 1100);
@@ -128,9 +120,6 @@ export class ReactorSimulation {
     const xenonProduction = clamp(this.neutronPower / 100, 0, 1.8) * 0.08;
     const xenonBurnoff = clamp(this.neutronPower / 100, 0, 2) * this.xenon * 0.0017;
     this.xenon = clamp(this.xenon + (xenonProduction - xenonBurnoff - 0.003) * safeDt, 0, 100);
-
-    const growth = (this.neutronPower - previousPower) / Math.max(previousPower, 0.00001);
-    this.periodSeconds = Math.abs(growth) < 0.000001 ? 999 : clamp(safeDt / growth, -999, 999);
 
     if (this.controls.az5 && this.neutronPower < 0.08) {
       this.mode = "shutdown";
@@ -143,11 +132,16 @@ export class ReactorSimulation {
   }
 
   public getSnapshot(): ReactorSnapshot {
+    return this.snapshot(this.calculateReactivityPcm());
+  }
+
+  private calculateReactivityPcm(): number {
     const rodReactivity = (64 - this.rodInsertion) * 17;
     const voidReactivity = Math.max(0, this.voidFraction - 4) * 9.5;
     const temperatureFeedback = -(this.fuelTemperature - 300) * 1.7;
     const xenonFeedback = -(this.xenon - 15) * 7.5;
-    return this.snapshot(-520 + rodReactivity + voidReactivity + temperatureFeedback + xenonFeedback);
+    const shutdownBias = -520;
+    return shutdownBias + rodReactivity + voidReactivity + temperatureFeedback + xenonFeedback;
   }
 
   private snapshot(reactivityPcm: number): ReactorSnapshot {
@@ -174,48 +168,13 @@ export class ReactorSimulation {
 
   private buildAlarms(): Alarm[] {
     return [
-      {
-        id: "high-power",
-        severity: "critical",
-        message: "REACTOR POWER HIGH",
-        active: this.neutronPower > 108,
-      },
-      {
-        id: "short-period",
-        severity: "critical",
-        message: "REACTOR PERIOD SHORT",
-        active: this.periodSeconds > 0 && this.periodSeconds < 10,
-      },
-      {
-        id: "high-pressure",
-        severity: "critical",
-        message: "DRUM PRESSURE HIGH",
-        active: this.steamPressure > 7.25,
-      },
-      {
-        id: "low-flow",
-        severity: "warning",
-        message: "MAIN CIRCULATION FLOW LOW",
-        active: this.coolantFlow < 28 && this.neutronPower > 8,
-      },
-      {
-        id: "high-fuel-temp",
-        severity: "warning",
-        message: "FUEL TEMPERATURE HIGH",
-        active: this.fuelTemperature > 760,
-      },
-      {
-        id: "turbine-overspeed",
-        severity: "critical",
-        message: "TURBINE OVERSPEED",
-        active: this.turbineRpm > 3060,
-      },
-      {
-        id: "scram",
-        severity: "info",
-        message: "AZ-5 ACTIVE",
-        active: this.mode === "scram",
-      },
+      { id: "high-power", severity: "critical", message: "REACTOR POWER HIGH", active: this.neutronPower > 108 },
+      { id: "short-period", severity: "critical", message: "REACTOR PERIOD SHORT", active: this.periodSeconds > 0 && this.periodSeconds < 10 },
+      { id: "high-pressure", severity: "critical", message: "DRUM PRESSURE HIGH", active: this.steamPressure > 7.25 },
+      { id: "low-flow", severity: "warning", message: "MAIN CIRCULATION FLOW LOW", active: this.coolantFlow < 28 && this.neutronPower > 8 },
+      { id: "high-fuel-temp", severity: "warning", message: "FUEL TEMPERATURE HIGH", active: this.fuelTemperature > 760 },
+      { id: "turbine-overspeed", severity: "critical", message: "TURBINE OVERSPEED", active: this.turbineRpm > 3060 },
+      { id: "scram", severity: "info", message: "AZ-5 ACTIVE", active: this.mode === "scram" },
     ];
   }
 }
