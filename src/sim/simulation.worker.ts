@@ -3,7 +3,7 @@
 import type { SimulationCommand, SimulationEvent } from "./protocol";
 import { TypeScriptSimulationBackend } from "./typescript-backend";
 
-const scope = self as DedicatedWorkerGlobalScope;
+const scope = self as unknown as DedicatedWorkerGlobalScope;
 const backend = new TypeScriptSimulationBackend();
 
 let fixedStepSeconds = 0.05;
@@ -38,7 +38,7 @@ function tick(nowMs: number): void {
     lastPublishMs = nowMs;
   }
 
-  setTimeout(() => tick(performance.now()), 8);
+  scope.setTimeout(() => tick(performance.now()), 8);
 }
 
 scope.addEventListener("message", (event: MessageEvent<SimulationCommand>) => {
