@@ -8,6 +8,7 @@ const backend = new TypeScriptSimulationBackend();
 
 let fixedStepSeconds = 0.05;
 let publishIntervalMs = 100;
+let speedMultiplier = 1;
 let paused = false;
 let sequence = 0;
 let accumulatorSeconds = 0;
@@ -26,11 +27,14 @@ function tick(nowMs: number): void {
   previousTimeMs = nowMs;
 
   if (!paused) {
-    accumulatorSeconds += elapsedSeconds;
-    while (accumulatorSeconds >= fixedStepSeconds) {
+    accumulatorSeconds += elapsedSeconds * speedMultiplier;
+    let steps = 0;
+    while (accumulatorSeconds >= fixedStepSeconds && steps < 250) {
       backend.step(fixedStepSeconds);
       accumulatorSeconds -= fixedStepSeconds;
+      steps += 1;
     }
+    if (steps === 250) accumulatorSeconds = 0;
   }
 
   if (nowMs - lastPublishMs >= publishIntervalMs) {
@@ -56,6 +60,10 @@ scope.addEventListener("message", (event: MessageEvent<SimulationCommand>) => {
         break;
       case "pause":
         paused = command.paused;
+        break;
+      case "speed":
+        speedMultiplier = Math.min(Math.max(command.multiplier, 0.25), 32);
+        post({ type: "speed", multiplier: speedMultiplier });
         break;
       case "reset":
         backend.reset();
