@@ -1,0 +1,51 @@
+#runtime-status {
+  display: block;
+  margin-top: 0.35rem;
+  color: #83a796;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  letter-spacing: 0.08em;
+}
+
+.panel-heading label {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.panel-heading select {
+  appearance: none;
+  border: 1px solid rgba(120, 180, 150, 0.28);
+  border-radius: 0.35rem;
+  background: #091510;
+  color: #b8d9c8;
+  padding: 0.4rem 1.8rem 0.4rem 0.55rem;
+  font: inherit;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+}
+
+.core-cell {
+  position: relative;
+  cursor: crosshair;
+  transition: filter 120ms ease, transform 120ms ease;
+}
+
+.core-cell:hover {
+  filter: brightness(1.45);
+  transform: scale(1.08);
+  z-index: 2;
+}
+
+.reactivity-stack {
+  min-width: 11rem;
+}
+
+@media (max-width: 760px) {
+  .panel-heading label small {
+    display: none;
+  }
+
+  .panel-heading select {
+    max-width: 8.5rem;
+  }
+}
