@@ -2,6 +2,13 @@ const AUDIO_PREFS_KEY = "rbmk-audio-preferences";
 const AUDIO_BASS_SAFETY_VERSION = 1;
 const AUDIO_BASS_SAFETY_KEY = "rbmk-audio-bass-safety-version";
 
+type ConnectFunction = (
+  this: AudioNode,
+  destination: AudioNode | AudioParam,
+  output?: number,
+  input?: number,
+) => AudioNode | void;
+
 function migrateUnsafeAudioLevels(): void {
   if (localStorage.getItem(AUDIO_BASS_SAFETY_KEY) === String(AUDIO_BASS_SAFETY_VERSION)) return;
 
@@ -27,7 +34,7 @@ function migrateUnsafeAudioLevels(): void {
 function installSubBassFilter(): void {
   const oscillatorPrototype = globalThis.OscillatorNode?.prototype;
   const sourcePrototype = globalThis.AudioBufferSourceNode?.prototype;
-  const originalConnect = globalThis.AudioNode?.prototype.connect;
+  const originalConnect = globalThis.AudioNode?.prototype.connect as ConnectFunction | undefined;
   if (!oscillatorPrototype || !sourcePrototype || !originalConnect) return;
 
   const patchSource = (prototype: AudioNode, cutoff: number): void => {
@@ -35,23 +42,23 @@ function installSubBassFilter(): void {
     const record = prototype as unknown as Record<string, unknown>;
     if (record[marker]) return;
 
-    const ownConnect = prototype.connect;
+    const ownConnect = prototype.connect as ConnectFunction;
     Object.defineProperty(prototype, "connect", {
       configurable: true,
       writable: true,
-      value(this: AudioNode, destination: AudioNode | AudioParam, output?: number, input?: number): AudioNode | void {
+      value(this: AudioNode, destination: AudioNode | AudioParam, output = 0, input = 0): AudioNode | void {
         if (destination instanceof AudioParam) {
-          return ownConnect.call(this, destination, output ?? 0) as void;
+          return ownConnect.call(this, destination, output);
         }
 
-        const context = this.context;
-        const highPass = context.createBiquadFilter();
+        const highPass = this.context.createBiquadFilter();
         highPass.type = "highpass";
         highPass.frequency.value = cutoff;
         highPass.Q.value = 0.72;
 
-        originalConnect.call(this, highPass, output ?? 0, 0);
-        return originalConnect.call(highPass, destination, 0, input ?? 0) as AudioNode;
+        originalConnect.call(this, highPass, output, 0);
+        originalConnect.call(highPass, destination, 0, input);
+        return destination;
       },
     });
     record[marker] = true;
