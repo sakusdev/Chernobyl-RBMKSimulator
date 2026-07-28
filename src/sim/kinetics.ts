@@ -19,7 +19,7 @@ export class SixGroupPointKinetics {
   readonly state: KineticsState;
   private readonly generationTimeSeconds: number;
 
-  constructor(initialPower = 1e-8, generationTimeSeconds = 0.001): void {
+  constructor(initialPower = 1e-8, generationTimeSeconds = 0.001) {
     this.generationTimeSeconds = generationTimeSeconds;
     this.state = {
       neutronDensity: Math.max(initialPower, 1e-12),
